@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import './App.css';
 
-const API = 'http://127.0.0.1:8000';
+const API = 'https://polymerismos.pythonanywhere.com';
 const catIcon = { School: 'ti-school', Life: 'ti-home', Fun: 'ti-heart' };
 
 function getToken() { return localStorage.getItem('ps_token'); }
