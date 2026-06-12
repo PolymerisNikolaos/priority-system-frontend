@@ -8,6 +8,10 @@ function getToken() { return localStorage.getItem('ps_token'); }
 function setToken(t) { localStorage.setItem('ps_token', t); }
 function getName() { return localStorage.getItem('ps_name'); }
 function setName(n) { localStorage.setItem('ps_name', n); }
+function getSyncCode() { return localStorage.getItem('ps_sync_code'); }
+function setSyncCode(c) { localStorage.setItem('ps_sync_code', c); }
+function getOnboarded() { return localStorage.getItem('ps_onboarded') === 'true'; }
+function setOnboarded(v) { localStorage.setItem('ps_onboarded', v ? 'true' : 'false'); }
 
 function loadColor(pct) {
   if (pct < 40) return '#5C8A7A';
@@ -44,58 +48,371 @@ function LoadBar({ tasks }) {
   );
 }
 
+// ── ONBOARDING ────────────────────────────────────────────
+const RESTORATIVE_PRESETS = [
+  { emoji: '🚶', label: 'Walk' },
+  { emoji: '🏋️', label: 'Gym' },
+  { emoji: '📚', label: 'Reading' },
+  { emoji: '🎵', label: 'Music' },
+  { emoji: '🍳', label: 'Cooking' },
+  { emoji: '🎮', label: 'Gaming' },
+  { emoji: '🧘', label: 'Meditation' },
+  { emoji: '🚴', label: 'Cycling' },
+  { emoji: '🎨', label: 'Art' },
+  { emoji: '🏊', label: 'Swimming' },
+];
+
 function Onboarding({ onDone }) {
+  const [screen, setScreen] = useState(1);
   const [name, setName] = useState('');
+  const [selected, setSelected] = useState([]);
+  const [custom, setCustom] = useState('');
+  const [timeFormat, setTimeFormat] = useState('24h');
+  const [dateFormat, setDateFormat] = useState('DD/MM/YYYY');
+  const [weekStart, setWeekStart] = useState('monday');
+  const [syncInput, setSyncInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  async function handleSubmit() {
+  function togglePreset(label) {
+    setSelected(prev =>
+      prev.includes(label) ? prev.filter(l => l !== label) : [...prev, label]
+    );
+  }
+
+  function addCustom() {
+    if (!custom.trim()) return;
+    setSelected(prev => [...prev, custom.trim()]);
+    setCustom('');
+  }
+
+  async function handleSyncCode() {
+    if (syncInput.length !== 6) return;
+    setLoading(true);
+    setError('');
+    try {
+      const newToken = crypto.randomUUID();
+      const res = await fetch(`${API}/auth/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sync_code: syncInput, token: newToken }),
+      });
+      if (!res.ok) { setError('Invalid sync code. Try again.'); setLoading(false); return; }
+      const data = await res.json();
+      setToken(newToken);
+      setName(data.name);
+      setSyncCode(data.sync_code);
+      setOnboarded(true);
+      onDone();
+    } catch { setError('Something went wrong.'); }
+    setLoading(false);
+  }
+
+  async function handleFinish() {
     if (!name.trim()) return;
     setLoading(true);
     try {
       const token = crypto.randomUUID();
-      const res = await fetch(`${API}/auth/init`, {
+      const initRes = await fetch(`${API}/auth/init`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token, name: name.trim() }),
       });
-      if (!res.ok) throw new Error('Failed');
+      if (!initRes.ok) throw new Error('Failed');
+      const initData = await initRes.json();
       setToken(token);
       setName(name.trim());
+      setSyncCode(initData.sync_code);
+
+      const activities = selected.map(label => ({ title: label, time: 30 }));
+      await fetch(`${API}/auth/complete-onboarding`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token,
+          time_format: timeFormat,
+          date_format: dateFormat,
+          week_start: weekStart,
+          restorative_activities: activities,
+          threshold: 100,
+        }),
+      });
+      setOnboarded(true);
       onDone();
-    } catch {
-      setError('Something went wrong, try again.');
-    } finally {
-      setLoading(false);
-    }
+    } catch { setError('Something went wrong. Try again.'); }
+    setLoading(false);
   }
 
+  const styles = {
+    wrap: { display: 'flex', flexDirection: 'column', height: '100%', padding: '32px 24px 24px' },
+    title: { fontFamily: 'var(--serif)', fontSize: '26px', color: 'var(--text)', marginBottom: '8px', lineHeight: 1.2 },
+    sub: { fontSize: '13px', color: 'var(--text3)', lineHeight: 1.65, marginBottom: '28px' },
+    btn: { width: '100%', padding: '13px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '12px', fontFamily: 'var(--font)', fontSize: '14px', fontWeight: '500', cursor: 'pointer', marginTop: 'auto' },
+    back: { background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: '13px', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '4px', padding: 0 },
+    dots: { display: 'flex', gap: '6px', justifyContent: 'center', marginBottom: '28px' },
+    dot: (active) => ({ width: active ? '20px' : '6px', height: '6px', borderRadius: '99px', background: active ? 'var(--accent)' : 'var(--s30)', transition: 'all 0.2s' }),
+  };
+
+  const Dots = ({ current }) => (
+    <div style={styles.dots}>
+      {[1,2,3,4].map(i => <div key={i} style={styles.dot(i === current)} />)}
+    </div>
+  );
+
+  if (screen === 0) {
+    return (
+      <div style={styles.wrap}>
+        <div style={styles.title}>Already have an account?</div>
+        <div style={styles.sub}>Enter your 6-digit sync code to access your tasks from this device.</div>
+        <input
+          className="form-input"
+          type="text"
+          inputMode="numeric"
+          maxLength={6}
+          placeholder="Enter 6-digit code"
+          value={syncInput}
+          onChange={e => setSyncInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+          style={{ fontSize: '24px', letterSpacing: '0.2em', textAlign: 'center', marginBottom: '12px' }}
+        />
+        {error && <div style={{ fontSize: '12px', color: 'var(--red)', marginBottom: '8px', textAlign: 'center' }}>{error}</div>}
+        <button style={styles.btn} onClick={handleSyncCode} disabled={loading || syncInput.length !== 6}>
+          {loading ? 'Syncing...' : 'Sync account'}
+        </button>
+        <button style={{ ...styles.back, justifyContent: 'center', marginTop: '16px' }} onClick={() => setScreen(1)}>
+          New user? Start here
+        </button>
+      </div>
+    );
+  }
+
+  if (screen === 1) {
+    return (
+      <div style={styles.wrap}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontFamily: 'var(--serif)', fontSize: '30px', color: 'var(--text)', marginBottom: '12px', lineHeight: 1.15 }}>
+            Your brain has limits.<br />We work with them.
+          </div>
+          <div style={styles.sub}>
+            Priority System uses your deadlines, energy, and mental load to build your daily task list automatically. No overwhelming lists. Just what matters today, in the right order.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '24px' }}>
+            {[
+              { icon: 'ti-brain', text: 'Algorithm that respects your mental load' },
+              { icon: 'ti-shield-check', text: 'Your tasks are private — we never see them' },
+              { icon: 'ti-clock-pause', text: 'Postpone without penalty, always' },
+            ].map((item, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 12px', background: 'var(--s30)', borderRadius: '12px' }}>
+                <i className={`ti ${item.icon}`} style={{ fontSize: '18px', color: 'var(--accent)', flexShrink: 0 }} />
+                <span style={{ fontSize: '13px', color: 'var(--text2)' }}>{item.text}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <button style={styles.btn} onClick={() => setScreen(2)}>Get started</button>
+        <button style={{ ...styles.back, justifyContent: 'center', marginTop: '12px' }} onClick={() => setScreen(0)}>
+          Already have an account?
+        </button>
+      </div>
+    );
+  }
+
+  if (screen === 2) {
+    return (
+      <div style={styles.wrap}>
+        <button style={styles.back} onClick={() => setScreen(1)}><i className="ti ti-arrow-left" /> Back</button>
+        <Dots current={1} />
+        <div style={styles.title}>What should we call you?</div>
+        <div style={styles.sub}>This is just your display name. No account, no email needed.</div>
+        <input
+          className="form-input"
+          type="text"
+          placeholder="Your name or nickname"
+          value={name}
+          onChange={e => setName(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && name.trim() && setScreen(3)}
+          style={{ fontSize: '15px', marginBottom: '12px' }}
+          autoFocus
+        />
+        {error && <div style={{ fontSize: '12px', color: 'var(--red)', marginBottom: '8px' }}>{error}</div>}
+        <button style={{ ...styles.btn, marginTop: '12px' }} onClick={() => name.trim() && setScreen(3)} disabled={!name.trim()}>
+          Continue
+        </button>
+      </div>
+    );
+  }
+
+  if (screen === 3) {
+    return (
+      <div style={styles.wrap}>
+        <button style={styles.back} onClick={() => setScreen(2)}><i className="ti ti-arrow-left" /> Back</button>
+        <Dots current={2} />
+        <div style={styles.title}>What helps you recharge?</div>
+        <div style={styles.sub}>These become daily restorative tasks that offset your mental load. Add as many as you like.</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '16px' }}>
+          {RESTORATIVE_PRESETS.map(p => (
+            <button
+              key={p.label}
+              onClick={() => togglePreset(p.label)}
+              style={{
+                padding: '7px 14px', borderRadius: '99px', border: '0.5px solid',
+                borderColor: selected.includes(p.label) ? 'var(--accent)' : 'var(--border)',
+                background: selected.includes(p.label) ? 'var(--accent)' : 'var(--p60)',
+                color: selected.includes(p.label) ? '#fff' : 'var(--text2)',
+                fontSize: '13px', cursor: 'pointer', fontFamily: 'var(--font)',
+                transition: 'all 0.15s',
+              }}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        {selected.filter(s => !RESTORATIVE_PRESETS.map(p => p.label).includes(s)).map(custom => (
+          <div key={custom} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '99px', background: 'var(--accent)', color: '#fff', fontSize: '13px', marginRight: '8px', marginBottom: '8px' }}>
+            {custom}
+            <button onClick={() => setSelected(prev => prev.filter(s => s !== custom))} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', padding: 0, fontSize: '14px', lineHeight: 1 }}>×</button>
+          </div>
+        ))}
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+          <input className="form-input" type="text" placeholder="Add your own..." value={custom} onChange={e => setCustom(e.target.value)} onKeyDown={e => e.key === 'Enter' && addCustom()} style={{ flex: 1 }} />
+          <button onClick={addCustom} style={{ padding: '10px 14px', background: 'var(--s30)', border: '0.5px solid var(--border)', borderRadius: '10px', cursor: 'pointer', color: 'var(--text2)', fontFamily: 'var(--font)', fontSize: '13px' }}>Add</button>
+        </div>
+        <button style={styles.btn} onClick={() => setScreen(4)}>
+          {selected.length === 0 ? 'Skip for now' : `Continue with ${selected.length} activit${selected.length === 1 ? 'y' : 'ies'}`}
+        </button>
+      </div>
+    );
+  }
+
+  if (screen === 4) {
+    return (
+      <div style={styles.wrap}>
+        <button style={styles.back} onClick={() => setScreen(3)}><i className="ti ti-arrow-left" /> Back</button>
+        <Dots current={3} />
+        <div style={styles.title}>A few preferences</div>
+        <div style={styles.sub}>You can change these anytime in settings.</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '24px' }}>
+          <div>
+            <label className="form-label">TIME FORMAT</label>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '5px' }}>
+              {['24h', '12h'].map(f => (
+                <button key={f} onClick={() => setTimeFormat(f)} style={{ flex: 1, padding: '10px', borderRadius: '10px', border: '0.5px solid', borderColor: timeFormat === f ? 'var(--accent)' : 'var(--border)', background: timeFormat === f ? 'var(--accent)' : 'var(--p60)', color: timeFormat === f ? '#fff' : 'var(--text2)', fontSize: '13px', cursor: 'pointer', fontFamily: 'var(--font)' }}>{f}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="form-label">DATE FORMAT</label>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '5px' }}>
+              {['DD/MM/YYYY', 'MM/DD/YYYY'].map(f => (
+                <button key={f} onClick={() => setDateFormat(f)} style={{ flex: 1, padding: '10px', borderRadius: '10px', border: '0.5px solid', borderColor: dateFormat === f ? 'var(--accent)' : 'var(--border)', background: dateFormat === f ? 'var(--accent)' : 'var(--p60)', color: dateFormat === f ? '#fff' : 'var(--text2)', fontSize: '12px', cursor: 'pointer', fontFamily: 'var(--font)' }}>{f}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="form-label">WEEK STARTS ON</label>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '5px' }}>
+              {['monday', 'sunday'].map(f => (
+                <button key={f} onClick={() => setWeekStart(f)} style={{ flex: 1, padding: '10px', borderRadius: '10px', border: '0.5px solid', borderColor: weekStart === f ? 'var(--accent)' : 'var(--border)', background: weekStart === f ? 'var(--accent)' : 'var(--p60)', color: weekStart === f ? '#fff' : 'var(--text2)', fontSize: '13px', cursor: 'pointer', fontFamily: 'var(--font)', textTransform: 'capitalize' }}>{f}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <button style={styles.btn} onClick={() => setScreen(5)}>Continue</button>
+      </div>
+    );
+  }
+
+  if (screen === 5) {
+    return (
+      <div style={styles.wrap}>
+        <Dots current={4} />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
+          <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '20px' }}>
+            <i className="ti ti-check" style={{ fontSize: '28px', color: '#fff' }} />
+          </div>
+          <div style={styles.title}>You're all set, {name}!</div>
+          <div style={{ ...styles.sub, marginBottom: '32px' }}>Your sync code lets you access Priority System from any device. Save it somewhere safe.</div>
+          <div style={{ background: 'var(--s30)', borderRadius: '16px', padding: '20px 32px', marginBottom: '8px' }}>
+            <div style={{ fontSize: '11px', color: 'var(--text3)', letterSpacing: '0.08em', marginBottom: '8px' }}>YOUR SYNC CODE</div>
+            <div style={{ fontFamily: 'var(--serif)', fontSize: '36px', color: 'var(--text)', letterSpacing: '0.15em' }}>••••••</div>
+            <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '6px' }}>Revealed after you start</div>
+          </div>
+        </div>
+        {error && <div style={{ fontSize: '12px', color: 'var(--red)', marginBottom: '8px', textAlign: 'center' }}>{error}</div>}
+        <button style={styles.btn} onClick={handleFinish} disabled={loading}>
+          {loading ? 'Setting up...' : "Let's go"}
+        </button>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+// ── HEAT MAP ──────────────────────────────────────────────
+function HeatMap({ allTasks }) {
+  const today = new Date();
+  const days = Array.from({ length: 14 }, (_, i) => {
+    const d = new Date(today);
+    d.setDate(today.getDate() - 13 + i);
+    return d;
+  });
+
+  function getIntensity(date) {
+    const ds = date.toISOString().split('T')[0];
+    const doneTasks = allTasks.filter(t => t.done_date === ds);
+    const hasRestorative = doneTasks.some(t => t.is_restorative);
+    const hasDraining = doneTasks.some(t => !t.is_restorative && t.mental_load >= 0);
+    if (doneTasks.length === 0) return 0;
+    if (hasRestorative && hasDraining) return 3;
+    if (hasDraining) return 2;
+    return 1;
+  }
+
+  const intensities = days.map(d => getIntensity(d));
+  const doneCount = intensities.filter(i => i > 0).length;
+
+  function getTLDR() {
+    const balanced = intensities.filter(i => i === 3).length;
+    const workHeavy = intensities.filter(i => i === 2).length;
+    const total = intensities.filter(i => i > 0).length;
+    if (total === 0) return null;
+    if (balanced >= 5) return "You've been showing up for both your work and yourself. This is what sustainable productivity looks like.";
+    if (workHeavy >= 5) return "You've been incredibly consistent with your work. Consider weaving in some recharge activities — even small ones reduce burnout risk significantly.";
+    if (total <= 3) return "It's been a quieter stretch. That happens. Even one small task today counts — momentum builds from the smallest starts.";
+    return "You've been showing up. Keep going.";
+  }
+
+  const tldr = getTLDR();
+  const colors = ['var(--s30)', '#b8d9cf', '#8dc4b7', '#5C8A7A'];
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '32px 24px' }}>
-      <div style={{ fontFamily: 'var(--serif)', fontSize: '28px', color: 'var(--text)', marginBottom: '8px', textAlign: 'center' }}>
-        Welcome to Priority System
+    <div style={{ margin: '0 14px 12px', background: 'var(--s30)', borderRadius: '14px', padding: '12px 14px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+        <span style={{ fontSize: '10px', color: 'var(--text3)', letterSpacing: '0.06em', fontWeight: '500' }}>CONSISTENCY — 14 DAYS</span>
+        <span style={{ fontSize: '11px', color: 'var(--accent)', fontWeight: '500' }}>{doneCount} / 14</span>
       </div>
-      <div style={{ fontSize: '13px', color: 'var(--text3)', marginBottom: '36px', textAlign: 'center', lineHeight: 1.6 }}>
-        Your algorithmic daily planner.<br />What should we call you?
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(14, 1fr)', gap: '3px' }}>
+        {days.map((d, i) => (
+          <div key={i} style={{ aspectRatio: '1', borderRadius: '3px', background: colors[intensities[i]], border: intensities[i] === 0 ? '0.5px solid var(--border)' : 'none' }} title={d.toISOString().split('T')[0]} />
+        ))}
       </div>
-      <input
-        className="form-input"
-        type="text"
-        placeholder="Your name"
-        value={name}
-        onChange={e => setName(e.target.value)}
-        onKeyDown={e => e.key === 'Enter' && handleSubmit()}
-        style={{ marginBottom: '12px', fontSize: '15px' }}
-        autoFocus
-      />
-      {error && <div style={{ fontSize: '12px', color: 'var(--red)', marginBottom: '8px' }}>{error}</div>}
-      <button className="submit-btn" onClick={handleSubmit} disabled={loading}>
-        {loading ? 'Setting up...' : "Let's go"}
-      </button>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(14, 1fr)', gap: '3px', marginTop: '4px' }}>
+        {days.map((d, i) => (
+          <div key={i} style={{ fontSize: '8px', color: 'var(--text3)', textAlign: 'center' }}>
+            {['M','T','W','T','F','S','S'][d.getDay() === 0 ? 6 : d.getDay() - 1]}
+          </div>
+        ))}
+      </div>
+      {tldr && (
+        <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--text2)', lineHeight: 1.55, paddingTop: '10px', borderTop: '0.5px solid var(--border)' }}>
+          {tldr}
+        </div>
+      )}
     </div>
   );
 }
 
+// ── ADD TASK PANEL ────────────────────────────────────────
 function AddTaskPanel({ open, onClose, onAdd, editTask, onEdit }) {
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('School');
@@ -106,6 +423,7 @@ function AddTaskPanel({ open, onClose, onAdd, editTask, onEdit }) {
   const [endTime, setEndTime] = useState('');
   const [importance, setImportance] = useState(5);
   const [loadOverride, setLoadOverride] = useState(0);
+  const [isRestorative, setIsRestorative] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -119,10 +437,11 @@ function AddTaskPanel({ open, onClose, onAdd, editTask, onEdit }) {
       setLoadOverride(editTask.mental_load || 0);
       setStartTime(editTask.start_time || '');
       setEndTime(editTask.end_time || '');
+      setIsRestorative(editTask.is_restorative || false);
     } else {
       setTitle(''); setCategory('School'); setType('task');
       setDeadline(''); setEstTime(''); setStartTime(''); setEndTime('');
-      setImportance(5); setLoadOverride(0);
+      setImportance(5); setLoadOverride(0); setIsRestorative(false);
     }
   }, [editTask, open]);
 
@@ -132,9 +451,9 @@ function AddTaskPanel({ open, onClose, onAdd, editTask, onEdit }) {
     if (!title.trim()) return;
     setLoading(true);
     if (editTask) {
-      await onEdit(editTask.id, { title, category, deadline, estTime, startTime, endTime, importance, loadOverride, type });
+      await onEdit(editTask.id, { title, category, deadline, estTime, startTime, endTime, importance, loadOverride, type, isRestorative });
     } else {
-      await onAdd({ title, category, type, deadline, estTime, startTime, endTime, importance, loadOverride });
+      await onAdd({ title, category, type, deadline, estTime, startTime, endTime, importance, loadOverride, isRestorative });
     }
     setLoading(false);
     onClose();
@@ -208,6 +527,15 @@ function AddTaskPanel({ open, onClose, onAdd, editTask, onEdit }) {
               </div>
               <input type="range" min="-100" max="100" value={loadOverride} onChange={e => setLoadOverride(Number(e.target.value))} />
             </div>
+            <div className="form-group" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <label className="form-label" style={{ margin: 0 }}>RESTORATIVE TASK</label>
+              <button
+                onClick={() => setIsRestorative(r => !r)}
+                style={{ width: '44px', height: '24px', borderRadius: '99px', border: 'none', cursor: 'pointer', background: isRestorative ? 'var(--accent)' : 'var(--s30)', transition: 'background 0.2s', position: 'relative' }}
+              >
+                <div style={{ width: '18px', height: '18px', borderRadius: '50%', background: '#fff', position: 'absolute', top: '3px', left: isRestorative ? '23px' : '3px', transition: 'left 0.2s' }} />
+              </button>
+            </div>
           </>
         )}
         <button className="submit-btn" onClick={handleSubmit} disabled={loading}>
@@ -218,6 +546,28 @@ function AddTaskPanel({ open, onClose, onAdd, editTask, onEdit }) {
   );
 }
 
+// ── SUBTASK ROW ───────────────────────────────────────────
+function SubtaskRow({ subtask, token, onToggle, onDelete }) {
+  async function toggle() {
+    await fetch(`${API}/subtasks/${subtask.id}/done?token=${token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+    onToggle();
+  }
+  async function del() {
+    await fetch(`${API}/subtasks/${subtask.id}?token=${token}`, { method: 'DELETE' });
+    onDelete();
+  }
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '5px 0 5px 12px' }}>
+      <button onClick={toggle} style={{ width: '16px', height: '16px', borderRadius: '50%', border: `1.5px solid ${subtask.done ? 'var(--accent)' : 'var(--border)'}`, background: subtask.done ? 'var(--accent)' : 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        {subtask.done && <i className="ti ti-check" style={{ fontSize: '9px', color: '#fff' }} />}
+      </button>
+      <span style={{ fontSize: '12px', color: 'var(--text2)', flex: 1, textDecoration: subtask.done ? 'line-through' : 'none', opacity: subtask.done ? 0.6 : 1 }}>{subtask.title}</span>
+      <button onClick={del} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: '12px', padding: '2px' }}><i className="ti ti-x" /></button>
+    </div>
+  );
+}
+
+// ── POMODORO ──────────────────────────────────────────────
 function PomodoroPanel({ open, onClose }) {
   const CIRC = 2 * Math.PI * 82;
   const [focusMin, setFocusMin] = useState(25);
@@ -230,22 +580,15 @@ function PomodoroPanel({ open, onClose }) {
   useEffect(() => {
     if (running) {
       intervalRef.current = setInterval(() => {
-        setSeconds(s => {
-          if (s <= 1) { clearInterval(intervalRef.current); setRunning(false); return 0; }
-          return s - 1;
-        });
+        setSeconds(s => { if (s <= 1) { clearInterval(intervalRef.current); setRunning(false); return 0; } return s - 1; });
       }, 1000);
-    } else {
-      clearInterval(intervalRef.current);
-    }
+    } else clearInterval(intervalRef.current);
     return () => clearInterval(intervalRef.current);
   }, [running]);
 
   function reset(min) {
-    clearInterval(intervalRef.current);
-    setRunning(false);
-    const s = (min || focusMin) * 60;
-    setSeconds(s); setTotal(s);
+    clearInterval(intervalRef.current); setRunning(false);
+    const s = (min || focusMin) * 60; setSeconds(s); setTotal(s);
   }
 
   const m = String(Math.floor(seconds / 60)).padStart(2, '0');
@@ -300,6 +643,7 @@ function PomodoroPanel({ open, onClose }) {
   );
 }
 
+// ── NOTES PANEL ───────────────────────────────────────────
 function NotesPanel({ open, onClose, token }) {
   const [notes, setNotes] = useState('');
   const [feedback, setFeedback] = useState('');
@@ -309,11 +653,7 @@ function NotesPanel({ open, onClose, token }) {
   async function sendFeedback() {
     if (!feedback.trim() || !tag) return;
     try {
-      await fetch(`${API}/feedback`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, comment: feedback.trim(), tag }),
-      });
+      await fetch(`${API}/feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, comment: feedback.trim(), tag }) });
       setFeedback(''); setTag(null); setSent(true);
       setTimeout(() => setSent(false), 3000);
     } catch { }
@@ -345,42 +685,20 @@ function NotesPanel({ open, onClose, token }) {
   );
 }
 
+// ── CALENDAR PANEL ────────────────────────────────────────
 function CalendarPanel({ open, onClose, allTasks }) {
   const today = new Date();
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
   const [selectedDate, setSelectedDate] = useState(null);
-
   const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
   function daysInMonth(y, m) { return new Date(y, m + 1, 0).getDate(); }
-  function firstDayOfMonth(y, m) {
-    const d = new Date(y, m, 1).getDay();
-    return d === 0 ? 6 : d - 1;
-  }
-
-  function prevMonth() {
-    if (viewMonth === 0) { setViewYear(y => y - 1); setViewMonth(11); }
-    else setViewMonth(m => m - 1);
-  }
-  function nextMonth() {
-    if (viewMonth === 11) { setViewYear(y => y + 1); setViewMonth(0); }
-    else setViewMonth(m => m + 1);
-  }
-
-  const totalDays = daysInMonth(viewYear, viewMonth);
-  const startOffset = firstDayOfMonth(viewYear, viewMonth);
-
-  function dateStr(day) {
-    return `${viewYear}-${String(viewMonth + 1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-  }
-
-  function tasksForDay(day) {
-    const ds = dateStr(day);
-    return allTasks.filter(t => t.deadline === ds || t.done_date === ds);
-  }
-
-  const selectedTasks = selectedDate ? tasksForDay(selectedDate) : [];
+  function firstDay(y, m) { const d = new Date(y, m, 1).getDay(); return d === 0 ? 6 : d - 1; }
+  function prevMonth() { if (viewMonth === 0) { setViewYear(y => y-1); setViewMonth(11); } else setViewMonth(m => m-1); }
+  function nextMonth() { if (viewMonth === 11) { setViewYear(y => y+1); setViewMonth(0); } else setViewMonth(m => m+1); }
+  function dateStr(day) { return `${viewYear}-${String(viewMonth+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`; }
+  function tasksForDay(day) { const ds = dateStr(day); return allTasks.filter(t => t.deadline === ds || t.done_date === ds); }
 
   return (
     <div className={`panel${open ? ' open' : ''}`}>
@@ -394,42 +712,30 @@ function CalendarPanel({ open, onClose, allTasks }) {
           <span style={{ fontFamily: 'var(--serif)', fontSize: '17px', color: 'var(--text)' }}>{monthNames[viewMonth]} {viewYear}</span>
           <button className="icon-btn" onClick={nextMonth}><i className="ti ti-chevron-right" /></button>
         </div>
-
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px', marginBottom: '8px' }}>
-          {['M','T','W','T','F','S','S'].map((d, i) => (
-            <div key={i} style={{ textAlign: 'center', fontSize: '10px', color: 'var(--text3)', fontWeight: '500', padding: '4px 0', letterSpacing: '0.04em' }}>{d}</div>
-          ))}
+          {['M','T','W','T','F','S','S'].map((d, i) => <div key={i} style={{ textAlign: 'center', fontSize: '10px', color: 'var(--text3)', fontWeight: '500', padding: '4px 0' }}>{d}</div>)}
         </div>
-
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '3px' }}>
-          {Array.from({ length: startOffset }).map((_, i) => <div key={`e${i}`} />)}
-          {Array.from({ length: totalDays }, (_, i) => i + 1).map(day => {
+          {Array.from({ length: firstDay(viewYear, viewMonth) }).map((_, i) => <div key={`e${i}`} />)}
+          {Array.from({ length: daysInMonth(viewYear, viewMonth) }, (_, i) => i+1).map(day => {
             const isToday = day === today.getDate() && viewMonth === today.getMonth() && viewYear === today.getFullYear();
             const hasTasks = tasksForDay(day).length > 0;
-            const isSelected = selectedDate === day;
+            const isSel = selectedDate === day;
             return (
-              <div key={day} onClick={() => setSelectedDate(isSelected ? null : day)}
-                style={{
-                  textAlign: 'center', padding: '7px 2px', borderRadius: '10px', cursor: 'pointer',
-                  background: isSelected ? 'var(--accent)' : isToday ? 'var(--s30)' : 'transparent',
-                  color: isSelected ? '#fff' : 'var(--text)', fontSize: '13px', fontWeight: isToday ? '600' : '400',
-                  position: 'relative', transition: 'background 0.15s',
-                }}>
+              <div key={day} onClick={() => setSelectedDate(isSel ? null : day)}
+                style={{ textAlign: 'center', padding: '7px 2px', borderRadius: '10px', cursor: 'pointer', background: isSel ? 'var(--accent)' : isToday ? 'var(--s30)' : 'transparent', color: isSel ? '#fff' : 'var(--text)', fontSize: '13px', fontWeight: isToday ? '600' : '400', transition: 'background 0.15s' }}>
                 {day}
-                {hasTasks && <div style={{ width: '4px', height: '4px', borderRadius: '50%', background: isSelected ? 'rgba(255,255,255,0.7)' : 'var(--accent)', margin: '2px auto 0' }} />}
+                {hasTasks && <div style={{ width: '4px', height: '4px', borderRadius: '50%', background: isSel ? 'rgba(255,255,255,0.7)' : 'var(--accent)', margin: '2px auto 0' }} />}
               </div>
             );
           })}
         </div>
-
         {selectedDate && (
           <div style={{ marginTop: '20px' }}>
-            <div style={{ fontSize: '10px', color: 'var(--text3)', letterSpacing: '0.07em', fontWeight: '500', marginBottom: '10px' }}>
-              {monthNames[viewMonth].toUpperCase()} {selectedDate}
-            </div>
-            {selectedTasks.length === 0
+            <div style={{ fontSize: '10px', color: 'var(--text3)', letterSpacing: '0.07em', fontWeight: '500', marginBottom: '10px' }}>{monthNames[viewMonth].toUpperCase()} {selectedDate}</div>
+            {tasksForDay(selectedDate).length === 0
               ? <div style={{ fontSize: '13px', color: 'var(--text3)', textAlign: 'center', padding: '20px 0' }}>No tasks for this day</div>
-              : selectedTasks.map(t => (
+              : tasksForDay(selectedDate).map(t => (
                 <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 12px', background: 'var(--card)', borderRadius: '12px', marginBottom: '7px', border: '0.5px solid var(--border)' }}>
                   <i className={`ti ${catIcon[t.category] || 'ti-circle'}`} style={{ fontSize: '14px', color: 'var(--accent)' }} />
                   <div style={{ flex: 1 }}>
@@ -447,14 +753,69 @@ function CalendarPanel({ open, onClose, allTasks }) {
   );
 }
 
+// ── SETTINGS PANEL ────────────────────────────────────────
+function SettingsPanel({ open, onClose, token, syncCode }) {
+  const [threshold, setThreshold] = useState(100);
+  const [saved, setSaved] = useState(false);
+  const [showCode, setShowCode] = useState(false);
+
+  async function save() {
+    await fetch(`${API}/settings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, threshold }) });
+    setSaved(true); setTimeout(() => setSaved(false), 2000);
+  }
+
+  return (
+    <div className={`panel${open ? ' open' : ''}`}>
+      <div className="panel-header">
+        <button className="close-btn" onClick={onClose}><i className="ti ti-arrow-left" /></button>
+        <span className="panel-title">Settings</span>
+      </div>
+      <div className="panel-body">
+        <div className="form-group">
+          <label className="form-label">DAILY LOAD THRESHOLD</label>
+          <div className="slider-row" style={{ marginBottom: '6px' }}>
+            <span className="slider-label">Relaxed</span>
+            <span className="slider-val">{threshold}</span>
+            <span className="slider-label">Ambitious</span>
+          </div>
+          <input type="range" min="30" max="300" step="10" value={threshold} onChange={e => setThreshold(Number(e.target.value))} />
+          <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '6px' }}>Controls how many tasks the algorithm includes in your daily card.</div>
+        </div>
+        <div className="form-group" style={{ marginTop: '20px' }}>
+          <label className="form-label">YOUR SYNC CODE</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px', background: 'var(--s30)', borderRadius: '12px', marginTop: '5px' }}>
+            <span style={{ fontFamily: 'var(--serif)', fontSize: '22px', color: 'var(--text)', letterSpacing: '0.12em', flex: 1 }}>
+              {showCode ? syncCode : '••••••'}
+            </span>
+            <button onClick={() => setShowCode(s => !s)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: '18px' }}>
+              <i className={`ti ${showCode ? 'ti-eye-off' : 'ti-eye'}`} />
+            </button>
+            <button onClick={() => navigator.clipboard.writeText(syncCode)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: '18px' }}>
+              <i className="ti ti-copy" />
+            </button>
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '6px' }}>Use this code to access your account from any device.</div>
+        </div>
+        <button className="submit-btn" onClick={save} style={{ marginTop: '24px' }}>
+          {saved ? 'Saved!' : 'Save settings'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── MAIN APP ──────────────────────────────────────────────
 const DAYS = ['MON','TUE','WED','THU','FRI','SAT','SUN'];
 
 export default function App() {
   const [dark, setDark] = useState(false);
-  const [onboarded, setOnboarded] = useState(!!getToken());
+  const [onboarded, setOnboardedState] = useState(getOnboarded());
   const [tasks, setTasks] = useState([]);
   const [allTasks, setAllTasks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [overloadCount, setOverloadCount] = useState(0);
+  const [expandedTask, setExpandedTask] = useState(null);
+  const [newSubtask, setNewSubtask] = useState('');
   const today = new Date();
   const todayIdx = today.getDay() === 0 ? 6 : today.getDay() - 1;
   const [activeDay, setActiveDay] = useState(todayIdx);
@@ -480,9 +841,11 @@ export default function App() {
         const cardData = await cardRes.json();
         const allData = await allRes.json();
         setAllTasks(allData || []);
+        setOverloadCount(cardData.overloaded_count || 0);
         const cardIds = new Set((cardData.tasks || []).map(t => t.id));
-        const doneTodayTasks = (allData || []).filter(t => t.status === 'done' && t.done_date === new Date().toISOString().split('T')[0] && !cardIds.has(t.id));
-        setTasks([...(cardData.tasks || []), ...doneTodayTasks]);
+        const todayStr = today.toISOString().split('T')[0];
+        const doneTasks = (allData || []).filter(t => t.status === 'done' && t.done_date === todayStr && !cardIds.has(t.id));
+        setTasks([...(cardData.tasks || []), ...doneTasks]);
       }
     } catch { }
     setLoading(false);
@@ -495,22 +858,18 @@ export default function App() {
 
   async function addTask(data) {
     const token = getToken();
-    const defaultLoad = data.category === 'School' ? 40 : data.category === 'Life' ? 20 : -20;
+    const defaultLoad = data.isRestorative ? -20 : data.category === 'School' ? 40 : data.category === 'Life' ? 20 : -20;
     try {
       await fetch(`${API}/tasks?token=${token}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: data.title,
-          category: data.category,
-          deadline: data.deadline || null,
-          importance: data.importance,
+          title: data.title, category: data.category,
+          deadline: data.deadline || null, importance: data.importance,
           implementation_time: data.estTime ? parseInt(data.estTime) || 30 : 30,
           mental_load: data.loadOverride !== 0 ? data.loadOverride : defaultLoad,
-          is_event: data.type === 'event',
-          is_assignment: data.type === 'assignment',
-          start_time: data.startTime || null,
-          end_time: data.endTime || null,
+          is_event: data.type === 'event', is_assignment: data.type === 'assignment',
+          is_restorative: data.isRestorative,
+          start_time: data.startTime || null, end_time: data.endTime || null,
         }),
       });
       await loadTasks();
@@ -521,15 +880,12 @@ export default function App() {
     const token = getToken();
     try {
       await fetch(`${API}/tasks/${id}?token=${token}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: data.title,
-          category: data.category,
-          deadline: data.deadline || null,
-          importance: data.importance,
+          title: data.title, category: data.category,
+          deadline: data.deadline || null, importance: data.importance,
           implementation_time: data.estTime ? parseInt(data.estTime) || 30 : 30,
-          mental_load: data.loadOverride,
+          mental_load: data.loadOverride, is_restorative: data.isRestorative,
         }),
       });
       await loadTasks();
@@ -540,17 +896,9 @@ export default function App() {
     const token = getToken();
     try {
       if (task.status === 'done') {
-        await fetch(`${API}/tasks/${task.id}?token=${token}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'active' }),
-        });
+        await fetch(`${API}/tasks/${task.id}?token=${token}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'active' }) });
       } else {
-        await fetch(`${API}/tasks/${task.id}/done?token=${token}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({}),
-        });
+        await fetch(`${API}/tasks/${task.id}/done?token=${token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
       }
       await loadTasks();
     } catch { }
@@ -559,11 +907,7 @@ export default function App() {
   async function postponeTask(task) {
     const token = getToken();
     try {
-      await fetch(`${API}/tasks/${task.id}/postpone?token=${token}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
+      await fetch(`${API}/tasks/${task.id}/postpone?token=${token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
       await loadTasks();
     } catch { }
   }
@@ -576,17 +920,28 @@ export default function App() {
     } catch { }
   }
 
+  async function addSubtask(taskId) {
+    if (!newSubtask.trim()) return;
+    const token = getToken();
+    try {
+      await fetch(`${API}/tasks/${taskId}/subtasks?token=${token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: newSubtask.trim() }) });
+      setNewSubtask('');
+      await loadTasks();
+    } catch { }
+  }
+
   function openPanel(name) { setPanel(name); setActiveNav(name); }
   function closePanel() { setPanel(null); setActiveNav('home'); setEditTask(null); }
 
   if (!onboarded) return (
     <div className={`phone${dark ? ' dark' : ''}`}>
-      <Onboarding onDone={() => { setOnboarded(true); loadTasks(); }} />
+      <Onboarding onDone={() => { setOnboardedState(true); loadTasks(); }} />
     </div>
   );
 
   const token = getToken();
   const name = getName();
+  const syncCode = getSyncCode() || '------';
   const events = tasks.filter(t => t.is_event);
   const regularTasks = tasks.filter(t => !t.is_event);
   const taskCount = regularTasks.filter(t => t.status !== 'done').length;
@@ -602,33 +957,42 @@ export default function App() {
               {loading ? 'Loading...' : `${taskCount} task${taskCount !== 1 ? 's' : ''} remaining${events.length ? ` · ${events.length} event${events.length !== 1 ? 's' : ''}` : ''}`}
             </div>
           </div>
-          <button className="icon-btn" onClick={() => setDark(d => !d)}>
-            <i className={`ti ${dark ? 'ti-sun' : 'ti-moon'}`} />
-          </button>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <button className="icon-btn" onClick={() => openPanel('settings')}><i className="ti ti-settings" /></button>
+            <button className="icon-btn" onClick={() => setDark(d => !d)}><i className={`ti ${dark ? 'ti-sun' : 'ti-moon'}`} /></button>
+          </div>
         </div>
       </div>
 
       <LoadBar tasks={tasks} />
 
-      <div className="week-strip">
-        {weekDays.map((d, i) => (
-          <div key={i} className={`day-cell${activeDay === i ? ' active' : ''}`} onClick={() => setActiveDay(i)}>
-            <span className="day-name">{d.name}</span>
-            <span className="day-num">{d.num}</span>
-            <div className={`day-dot${i === todayIdx ? ' has' : ''}`} />
-          </div>
-        ))}
+      {overloadCount > 0 && (
+        <div style={{ margin: '0 14px 8px', padding: '9px 12px', background: '#FAEEDA', borderRadius: '10px', fontSize: '11px', color: '#854F0B', lineHeight: 1.5 }}>
+          <i className="ti ti-info-circle" style={{ fontSize: '12px', verticalAlign: '-1px', marginRight: '5px' }} />
+          {overloadCount} task{overloadCount !== 1 ? 's' : ''} didn't fit today. Try spreading your study sessions across more days to avoid overload.
+        </div>
+      )}
+
+      <div className="week-strip-wrap">
+        <div className="week-strip">
+          {weekDays.map((d, i) => (
+            <div key={i} className={`day-cell${activeDay === i ? ' active' : ''}`} onClick={() => setActiveDay(i)}>
+              <span className="day-name">{d.name}</span>
+              <span className="day-num">{d.num}</span>
+              <div className={`day-dot${i === todayIdx ? ' has' : ''}`} />
+            </div>
+          ))}
+        </div>
       </div>
+
+      <HeatMap allTasks={allTasks} />
 
       <div className="task-section">
         <div className="section-header">
           <span className="section-title">{name ? `${name}'s day` : 'Today'}</span>
         </div>
 
-        {loading && (
-          <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text3)', fontSize: '13px' }}>Loading your tasks...</div>
-        )}
-
+        {loading && <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text3)', fontSize: '13px' }}>Loading your tasks...</div>}
         {!loading && tasks.length === 0 && (
           <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text3)', fontSize: '13px', lineHeight: 1.6 }}>
             No tasks yet.<br />Tap + to add your first task.
@@ -644,8 +1008,8 @@ export default function App() {
               {ev.start_time && ev.end_time && <div className="event-time-display">{ev.start_time} – {ev.end_time}</div>}
             </div>
             <div style={{ display: 'flex', gap: '4px' }}>
-              <button className="postpone-btn" onClick={() => { setEditTask(ev); openPanel('add'); }} title="Edit"><i className="ti ti-pencil" /></button>
-              <button className="postpone-btn" style={{ color: 'var(--red)' }} onClick={() => deleteTask(ev)} title="Delete"><i className="ti ti-trash" /></button>
+              <button className="postpone-btn" onClick={() => { setEditTask(ev); openPanel('add'); }}><i className="ti ti-pencil" /></button>
+              <button className="postpone-btn" style={{ color: 'var(--red)' }} onClick={() => deleteTask(ev)}><i className="ti ti-trash" /></button>
             </div>
           </div>
         ))}
@@ -653,6 +1017,7 @@ export default function App() {
         {regularTasks.map((t, i) => {
           const prev = regularTasks[i - 1];
           const showSep = prev && prev.category === 'School' && t.category !== 'School' && t.status !== 'done';
+          const isExpanded = expandedTask === t.id;
           return (
             <div key={t.id}>
               {showSep && (
@@ -662,39 +1027,67 @@ export default function App() {
                   <div className="sep-line" />
                 </div>
               )}
-              <div className={`task-item${t.status === 'done' ? ' done' : ''}`}>
-                <button className={`task-check${t.status === 'done' ? ' checked' : ''}`} onClick={() => toggleDone(t)}>
-                  {t.status === 'done' && <i className="ti ti-check" />}
-                </button>
-                <div className="task-body">
-                  <div className="task-type-row">
-                    <span className="task-type">
-                      <i className={`ti ${catIcon[t.category] || 'ti-circle'}`} style={{ fontSize: '10px' }} /> {(t.category || '').toUpperCase()}
-                    </span>
-                  </div>
-                  <div className="task-title">{t.title}</div>
-                  <div className="task-meta">
-                    {t.implementation_time && <><i className="ti ti-clock" style={{ fontSize: '11px' }} /> {t.implementation_time}min</>}
-                    {t.deadline && <><i className="ti ti-calendar-event" style={{ fontSize: '11px' }} /> {t.deadline}</>}
-                    {t.missed_first_date && <><i className="ti ti-alert-circle" style={{ fontSize: '11px', color: 'var(--red)' }} /> Missed</>}
-                  </div>
-                </div>
-                <div className="task-right">
-                  <LoadPill load={t.mental_load || 0} />
-                  {t.missed_first_date && <div className="missed-dot" title={`Missed since ${t.missed_first_date}`} />}
-                  {t.status !== 'done' && (
-                    <div style={{ display: 'flex', gap: '2px' }}>
-                      {t.mental_load >= 0 && (
-                        <button className="postpone-btn" title="Postpone" onClick={() => postponeTask(t)}><i className="ti ti-clock-pause" /></button>
-                      )}
-                      <button className="postpone-btn" title="Edit" onClick={() => { setEditTask(t); openPanel('add'); }}><i className="ti ti-pencil" /></button>
-                      <button className="postpone-btn" style={{ color: 'var(--red)' }} title="Delete" onClick={() => deleteTask(t)}><i className="ti ti-trash" /></button>
+              <div className={`task-item${t.status === 'done' ? ' done' : ''}`} style={{ flexDirection: 'column' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', width: '100%' }}>
+                  <button className={`task-check${t.status === 'done' ? ' checked' : ''}`} onClick={() => toggleDone(t)}>
+                    {t.status === 'done' && <i className="ti ti-check" />}
+                  </button>
+                  <div className="task-body" onClick={() => setExpandedTask(isExpanded ? null : t.id)} style={{ cursor: 'pointer' }}>
+                    <div className="task-type-row">
+                      <span className="task-type">
+                        <i className={`ti ${catIcon[t.category] || 'ti-circle'}`} style={{ fontSize: '10px' }} /> {(t.category || '').toUpperCase()}
+                        {t.is_restorative && <span style={{ marginLeft: '4px', color: 'var(--accent)' }}>· restorative</span>}
+                      </span>
                     </div>
-                  )}
-                  {t.status === 'done' && (
-                    <button className="postpone-btn" style={{ color: 'var(--red)' }} title="Delete" onClick={() => deleteTask(t)}><i className="ti ti-trash" /></button>
-                  )}
+                    <div className="task-title">{t.title}</div>
+                    <div className="task-meta">
+                      {t.implementation_time && <><i className="ti ti-clock" style={{ fontSize: '11px' }} /> {t.implementation_time}min</>}
+                      {t.deadline && <><i className="ti ti-calendar-event" style={{ fontSize: '11px' }} /> {t.deadline}</>}
+                      {t.missed_first_date && <><i className="ti ti-alert-circle" style={{ fontSize: '11px', color: 'var(--red)' }} /> Missed</>}
+                    </div>
+                    {t.subtasks && t.subtasks.length > 0 && (
+                      <div style={{ fontSize: '10px', color: 'var(--text3)', marginTop: '3px' }}>
+                        {t.subtasks.filter(s => s.done).length}/{t.subtasks.length} subtasks
+                      </div>
+                    )}
+                  </div>
+                  <div className="task-right">
+                    <LoadPill load={t.mental_load || 0} />
+                    {t.missed_first_date && <div className="missed-dot" />}
+                    {t.status !== 'done' && (
+                      <div style={{ display: 'flex', gap: '2px' }}>
+                        {!t.is_restorative && (
+                          <button className="postpone-btn" onClick={() => postponeTask(t)}><i className="ti ti-clock-pause" /></button>
+                        )}
+                        <button className="postpone-btn" onClick={() => { setEditTask(t); openPanel('add'); }}><i className="ti ti-pencil" /></button>
+                        <button className="postpone-btn" style={{ color: 'var(--red)' }} onClick={() => deleteTask(t)}><i className="ti ti-trash" /></button>
+                      </div>
+                    )}
+                    {t.status === 'done' && (
+                      <button className="postpone-btn" style={{ color: 'var(--red)' }} onClick={() => deleteTask(t)}><i className="ti ti-trash" /></button>
+                    )}
+                  </div>
                 </div>
+
+                {isExpanded && (
+                  <div style={{ width: '100%', paddingTop: '8px', borderTop: '0.5px solid var(--border)', marginTop: '8px' }}>
+                    {(t.subtasks || []).map(sub => (
+                      <SubtaskRow key={sub.id} subtask={sub} token={token} onToggle={loadTasks} onDelete={loadTasks} />
+                    ))}
+                    <div style={{ display: 'flex', gap: '6px', marginTop: '6px', paddingLeft: '12px' }}>
+                      <input
+                        className="form-input"
+                        type="text"
+                        placeholder="Add subtask..."
+                        value={newSubtask}
+                        onChange={e => setNewSubtask(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && addSubtask(t.id)}
+                        style={{ flex: 1, fontSize: '12px', padding: '6px 10px' }}
+                      />
+                      <button onClick={() => addSubtask(t.id)} style={{ padding: '6px 10px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '12px' }}>+</button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -702,27 +1095,18 @@ export default function App() {
       </div>
 
       <div className="bottom-nav">
-        <button className={`nav-btn${activeNav === 'home' ? ' active' : ''}`} onClick={closePanel}>
-          <i className="ti ti-home" /><span>HOME</span>
-        </button>
-        <button className={`nav-btn${activeNav === 'pomo' ? ' active' : ''}`} onClick={() => openPanel('pomo')}>
-          <i className="ti ti-clock-hour-4" /><span>FOCUS</span>
-        </button>
-        <button className="nav-add" onClick={() => { setEditTask(null); openPanel('add'); }}>
-          <i className="ti ti-plus" />
-        </button>
-        <button className={`nav-btn${activeNav === 'notes' ? ' active' : ''}`} onClick={() => openPanel('notes')}>
-          <i className="ti ti-notes" /><span>NOTES</span>
-        </button>
-        <button className={`nav-btn${activeNav === 'cal' ? ' active' : ''}`} onClick={() => openPanel('cal')}>
-          <i className="ti ti-calendar-month" /><span>CALENDAR</span>
-        </button>
+        <button className={`nav-btn${activeNav === 'home' ? ' active' : ''}`} onClick={closePanel}><i className="ti ti-home" /><span>HOME</span></button>
+        <button className={`nav-btn${activeNav === 'pomo' ? ' active' : ''}`} onClick={() => openPanel('pomo')}><i className="ti ti-clock-hour-4" /><span>FOCUS</span></button>
+        <button className="nav-add" onClick={() => { setEditTask(null); openPanel('add'); }}><i className="ti ti-plus" /></button>
+        <button className={`nav-btn${activeNav === 'notes' ? ' active' : ''}`} onClick={() => openPanel('notes')}><i className="ti ti-notes" /><span>NOTES</span></button>
+        <button className={`nav-btn${activeNav === 'cal' ? ' active' : ''}`} onClick={() => openPanel('cal')}><i className="ti ti-calendar-month" /><span>CALENDAR</span></button>
       </div>
 
       <AddTaskPanel open={panel === 'add'} onClose={closePanel} onAdd={addTask} editTask={editTask} onEdit={editTaskFn} />
       <PomodoroPanel open={panel === 'pomo'} onClose={closePanel} />
       <NotesPanel open={panel === 'notes'} onClose={closePanel} token={token} />
       <CalendarPanel open={panel === 'cal'} onClose={closePanel} allTasks={allTasks} />
+      <SettingsPanel open={panel === 'settings'} onClose={closePanel} token={token} syncCode={syncCode} />
     </div>
   );
 }
