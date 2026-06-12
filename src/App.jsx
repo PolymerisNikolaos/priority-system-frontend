@@ -910,7 +910,11 @@ export default function App() {
             <div key={i} className={`day-cell${activeDay===i?' active':''}`} onClick={()=>setActiveDay(i)}>
               <span className="day-name">{d.name}</span>
               <span className="day-num">{d.num}</span>
-              <div className={`day-dot${i===todayIdx?' has':''}`}/>
+              <div className={`day-dot${(() => {
+              const d = new Date(today);
+              d.setDate(today.getDate() - todayIdx + i);
+              const ds = d.toISOString().split('T')[0];
+              return allTasks.some(t => t.deadline === ds) ? ' has' : '';})()} `}/>
             </div>
           ))}
         </div>
