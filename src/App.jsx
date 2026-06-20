@@ -3,6 +3,19 @@ import './App.css';
 
 const API = 'https://polymerismos.pythonanywhere.com';
 const catIcon = { School: 'ti-school', Life: 'ti-home', Fun: 'ti-heart' };
+const DESKTOP_BREAKPOINT = 768;
+
+function useIsDesktop() {
+  const [isDesktop, setIsDesktop] = useState(
+    typeof window !== 'undefined' ? window.innerWidth >= DESKTOP_BREAKPOINT : false
+  );
+  useEffect(() => {
+    function onResize() { setIsDesktop(window.innerWidth >= DESKTOP_BREAKPOINT); }
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return isDesktop;
+}
 
 function getToken() { return localStorage.getItem('ps_token'); }
 function setToken(t) { localStorage.setItem('ps_token', t); }
@@ -489,7 +502,7 @@ function SubtaskRow({ subtask, token, onRefresh }) {
 }
 
 // ── POMODORO ──────────────────────────────────────────────
-function PomodoroPanel({ open, onClose }) {
+function PomodoroPanel({ open, onClose, inline }) {
   const CIRC = 2 * Math.PI * 82;
   const [focusMin, setFocusMin] = useState(25);
   const [breakMin, setBreakMin] = useState(5);
@@ -510,6 +523,47 @@ function PomodoroPanel({ open, onClose }) {
   const s = String(seconds%60).padStart(2,'0');
   const offset = CIRC*(1-(total>0?seconds/total:1));
 
+  const innerContent = (
+    <>
+      <div className="pomo-wrap">
+        <div className="pomo-circle">
+          <svg className="pomo-svg" width="190" height="190" viewBox="0 0 190 190">
+            <circle cx="95" cy="95" r="82" fill="none" stroke="var(--s30)" strokeWidth="7" />
+            <circle cx="95" cy="95" r="82" fill="none" stroke="var(--accent)" strokeWidth="7"
+              strokeDasharray={CIRC} strokeDashoffset={offset} strokeLinecap="round"
+              style={{ transform:'rotate(-90deg)', transformOrigin:'95px 95px', transition:running?'stroke-dashoffset 1s linear':'none' }} />
+          </svg>
+          <div className="pomo-time-display"><div className="pomo-big">{m}:{s}</div><div className="pomo-small">FOCUS</div></div>
+        </div>
+        <div className="pomo-controls">
+          <button className="pomo-btn" onClick={() => reset()}><i className="ti ti-refresh" /></button>
+          <button className="pomo-btn primary" onClick={() => setRunning(r=>!r)}>
+            <i className={`ti ${running?'ti-player-pause':'ti-player-play'}`} />
+            {running ? 'Pause' : seconds<total ? 'Resume' : 'Start'}
+          </button>
+        </div>
+      </div>
+      <div className="pomo-divider" />
+      <div className="pomo-setting">
+        <div className="pomo-setting-header"><span className="pomo-setting-label"><i className="ti ti-brain" /> Focus duration</span><span className="pomo-setting-val">{focusMin} min</span></div>
+        <input type="range" min="5" max="60" step="5" value={focusMin} onChange={e=>{setFocusMin(Number(e.target.value));reset(Number(e.target.value));}} />
+      </div>
+      <div className="pomo-setting">
+        <div className="pomo-setting-header"><span className="pomo-setting-label"><i className="ti ti-coffee" /> Break duration</span><span className="pomo-setting-val">{breakMin} min</span></div>
+        <input type="range" min="1" max="30" step="1" value={breakMin} onChange={e=>setBreakMin(Number(e.target.value))} />
+      </div>
+    </>
+  );
+
+  if (inline) {
+    return (
+      <div>
+        <div className="panel-title" style={{ fontSize: '16px', marginBottom: '16px' }}>Focus timer</div>
+        {innerContent}
+      </div>
+    );
+  }
+
   return (
     <div className={`panel${open?' open':''}`}>
       <div className="panel-header">
@@ -517,40 +571,14 @@ function PomodoroPanel({ open, onClose }) {
         <span className="panel-title">Focus timer</span>
       </div>
       <div className="panel-body">
-        <div className="pomo-wrap">
-          <div className="pomo-circle">
-            <svg className="pomo-svg" width="190" height="190" viewBox="0 0 190 190">
-              <circle cx="95" cy="95" r="82" fill="none" stroke="var(--s30)" strokeWidth="7" />
-              <circle cx="95" cy="95" r="82" fill="none" stroke="var(--accent)" strokeWidth="7"
-                strokeDasharray={CIRC} strokeDashoffset={offset} strokeLinecap="round"
-                style={{ transform:'rotate(-90deg)', transformOrigin:'95px 95px', transition:running?'stroke-dashoffset 1s linear':'none' }} />
-            </svg>
-            <div className="pomo-time-display"><div className="pomo-big">{m}:{s}</div><div className="pomo-small">FOCUS</div></div>
-          </div>
-          <div className="pomo-controls">
-            <button className="pomo-btn" onClick={() => reset()}><i className="ti ti-refresh" /></button>
-            <button className="pomo-btn primary" onClick={() => setRunning(r=>!r)}>
-              <i className={`ti ${running?'ti-player-pause':'ti-player-play'}`} />
-              {running ? 'Pause' : seconds<total ? 'Resume' : 'Start'}
-            </button>
-          </div>
-        </div>
-        <div className="pomo-divider" />
-        <div className="pomo-setting">
-          <div className="pomo-setting-header"><span className="pomo-setting-label"><i className="ti ti-brain" /> Focus duration</span><span className="pomo-setting-val">{focusMin} min</span></div>
-          <input type="range" min="5" max="60" step="5" value={focusMin} onChange={e=>{setFocusMin(Number(e.target.value));reset(Number(e.target.value));}} />
-        </div>
-        <div className="pomo-setting">
-          <div className="pomo-setting-header"><span className="pomo-setting-label"><i className="ti ti-coffee" /> Break duration</span><span className="pomo-setting-val">{breakMin} min</span></div>
-          <input type="range" min="1" max="30" step="1" value={breakMin} onChange={e=>setBreakMin(Number(e.target.value))} />
-        </div>
+        {innerContent}
       </div>
     </div>
   );
 }
 
 // ── NOTES ─────────────────────────────────────────────────
-function NotesPanel({ open, onClose, token }) {
+function NotesPanel({ open, onClose, token, inline }) {
   const [notes, setNotes] = useState('');
   const [feedback, setFeedback] = useState('');
   const [tag, setTag] = useState(null);
@@ -564,25 +592,40 @@ function NotesPanel({ open, onClose, token }) {
     } catch {}
   }
 
+  const innerContent = (
+    <>
+      <div className="form-label">SCRATCHPAD</div>
+      <textarea className="notes-textarea" placeholder="Dump your thoughts here..." value={notes} onChange={e=>setNotes(e.target.value)} style={{ marginTop:'5px' }} />
+      <div className="notes-hint">Not saved to tasks</div>
+      <div className="feedback-divider">SEND FEEDBACK</div>
+      <textarea className="notes-textarea" style={{ minHeight:'80px' }} placeholder="Found a bug? Something confusing? Have a suggestion?" value={feedback} onChange={e=>setFeedback(e.target.value)} />
+      <div className="tag-row">{['Bug','Confusing','Suggestion'].map(t=><button key={t} className={`tag-btn${tag===t?' selected':''}`} onClick={()=>setTag(t===tag?null:t)}>{t}</button>)}</div>
+      {sent ? <div style={{ textAlign:'center', color:'var(--accent)', fontSize:'13px', marginTop:'12px' }}>Feedback sent!</div>
+        : <button className="send-btn" onClick={sendFeedback}><i className="ti ti-send" /> Send feedback</button>}
+    </>
+  );
+
+  if (inline) {
+    return (
+      <div>
+        <div className="panel-title" style={{ fontSize: '16px', marginBottom: '16px' }}>Notes</div>
+        {innerContent}
+      </div>
+    );
+  }
+
   return (
     <div className={`panel${open?' open':''}`}>
       <div className="panel-header"><button className="close-btn" onClick={onClose}><i className="ti ti-arrow-left" /></button><span className="panel-title">Notes</span></div>
       <div className="panel-body">
-        <div className="form-label">SCRATCHPAD</div>
-        <textarea className="notes-textarea" placeholder="Dump your thoughts here..." value={notes} onChange={e=>setNotes(e.target.value)} style={{ marginTop:'5px' }} />
-        <div className="notes-hint">Not saved to tasks</div>
-        <div className="feedback-divider">SEND FEEDBACK</div>
-        <textarea className="notes-textarea" style={{ minHeight:'80px' }} placeholder="Found a bug? Something confusing? Have a suggestion?" value={feedback} onChange={e=>setFeedback(e.target.value)} />
-        <div className="tag-row">{['Bug','Confusing','Suggestion'].map(t=><button key={t} className={`tag-btn${tag===t?' selected':''}`} onClick={()=>setTag(t===tag?null:t)}>{t}</button>)}</div>
-        {sent ? <div style={{ textAlign:'center', color:'var(--accent)', fontSize:'13px', marginTop:'12px' }}>Feedback sent!</div>
-          : <button className="send-btn" onClick={sendFeedback}><i className="ti ti-send" /> Send feedback</button>}
+        {innerContent}
       </div>
     </div>
   );
 }
 
 // ── CALENDAR ──────────────────────────────────────────────
-function CalendarPanel({ open, onClose, allTasks, onAddWithDate }) {
+function CalendarPanel({ open, onClose, allTasks, onAddWithDate, inline }) {
   const today = new Date();
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
@@ -596,63 +639,73 @@ function CalendarPanel({ open, onClose, allTasks, onAddWithDate }) {
   function dateStr(day){return `${viewYear}-${String(viewMonth+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;}
   function tasksForDay(day){const ds=dateStr(day);return allTasks.filter(t=>t.deadline===ds||t.done_date===ds);}
 
+  const innerContent = (
+    <>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'16px' }}>
+        <button className="icon-btn" onClick={prevMonth}><i className="ti ti-chevron-left" /></button>
+        <span style={{ fontFamily:'var(--serif)', fontSize:'17px', color:'var(--text)' }}>{months[viewMonth]} {viewYear}</span>
+        <button className="icon-btn" onClick={nextMonth}><i className="ti ti-chevron-right" /></button>
+      </div>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:'2px', marginBottom:'8px' }}>
+        {['M','T','W','T','F','S','S'].map((d,i)=><div key={i} style={{ textAlign:'center', fontSize:'10px', color:'var(--text3)', fontWeight:'500', padding:'4px 0' }}>{d}</div>)}
+      </div>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:'3px' }}>
+        {Array.from({length:firstDay(viewYear,viewMonth)}).map((_,i)=><div key={`e${i}`}/>)}
+        {Array.from({length:daysInMonth(viewYear,viewMonth)},(_,i)=>i+1).map(day=>{
+          const isToday=day===today.getDate()&&viewMonth===today.getMonth()&&viewYear===today.getFullYear();
+          const hasTasks=tasksForDay(day).length>0;
+          const isSel=selectedDate===day;
+          return (
+            <div key={day} onClick={()=>setSelectedDate(isSel?null:day)}
+              style={{ textAlign:'center', padding:'7px 2px', borderRadius:'10px', cursor:'pointer', background:isSel?'var(--accent)':isToday?'var(--s30)':'transparent', color:isSel?'#fff':'var(--text)', fontSize:'13px', fontWeight:isToday?'600':'400', transition:'background 0.15s' }}>
+              {day}
+              {hasTasks&&<div style={{ width:'4px', height:'4px', borderRadius:'50%', background:isSel?'rgba(255,255,255,0.7)':'var(--accent)', margin:'2px auto 0' }}/>}
+            </div>
+          );
+        })}
+      </div>
+      {selectedDate && (
+        <div style={{ marginTop:'20px' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px' }}>
+            <div style={{ fontSize:'10px', color:'var(--text3)', letterSpacing:'0.07em', fontWeight:'500' }}>{months[viewMonth].toUpperCase()} {selectedDate}</div>
+            <button onClick={() => { onAddWithDate(dateStr(selectedDate)); if (!inline) onClose(); }} style={{ fontSize:'11px', color:'var(--accent)', background:'none', border:'0.5px solid var(--accent)', borderRadius:'8px', padding:'4px 10px', cursor:'pointer', fontFamily:'var(--font)', display:'flex', alignItems:'center', gap:'4px' }}>
+              <i className="ti ti-plus" style={{ fontSize:'11px' }} /> Add task
+            </button>
+          </div>
+          {tasksForDay(selectedDate).length===0
+            ? <div style={{ fontSize:'13px', color:'var(--text3)', textAlign:'center', padding:'20px 0' }}>No tasks for this day</div>
+            : tasksForDay(selectedDate).map(t=>(
+              <div key={t.id} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'9px 12px', background:'var(--card)', borderRadius:'12px', marginBottom:'7px', border:'0.5px solid var(--border)' }}>
+                <i className={`ti ${catIcon[t.category]||'ti-circle'}`} style={{ fontSize:'14px', color:'var(--accent)' }}/>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:'13px', fontWeight:'500', color:'var(--text)', textDecoration:t.status==='done'?'line-through':'none' }}>{t.title}</div>
+                  <div style={{ fontSize:'11px', color:'var(--text3)', marginTop:'2px' }}>{t.status}</div>
+                </div>
+                <LoadPill load={t.mental_load||0}/>
+              </div>
+            ))
+          }
+        </div>
+      )}
+    </>
+  );
+
+  if (inline) {
+    return <div>{innerContent}</div>;
+  }
+
   return (
     <div className={`panel${open?' open':''}`}>
       <div className="panel-header"><button className="close-btn" onClick={onClose}><i className="ti ti-arrow-left" /></button><span className="panel-title">Calendar</span></div>
       <div className="panel-body">
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'16px' }}>
-          <button className="icon-btn" onClick={prevMonth}><i className="ti ti-chevron-left" /></button>
-          <span style={{ fontFamily:'var(--serif)', fontSize:'17px', color:'var(--text)' }}>{months[viewMonth]} {viewYear}</span>
-          <button className="icon-btn" onClick={nextMonth}><i className="ti ti-chevron-right" /></button>
-        </div>
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:'2px', marginBottom:'8px' }}>
-          {['M','T','W','T','F','S','S'].map((d,i)=><div key={i} style={{ textAlign:'center', fontSize:'10px', color:'var(--text3)', fontWeight:'500', padding:'4px 0' }}>{d}</div>)}
-        </div>
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:'3px' }}>
-          {Array.from({length:firstDay(viewYear,viewMonth)}).map((_,i)=><div key={`e${i}`}/>)}
-          {Array.from({length:daysInMonth(viewYear,viewMonth)},(_,i)=>i+1).map(day=>{
-            const isToday=day===today.getDate()&&viewMonth===today.getMonth()&&viewYear===today.getFullYear();
-            const hasTasks=tasksForDay(day).length>0;
-            const isSel=selectedDate===day;
-            return (
-              <div key={day} onClick={()=>setSelectedDate(isSel?null:day)}
-                style={{ textAlign:'center', padding:'7px 2px', borderRadius:'10px', cursor:'pointer', background:isSel?'var(--accent)':isToday?'var(--s30)':'transparent', color:isSel?'#fff':'var(--text)', fontSize:'13px', fontWeight:isToday?'600':'400', transition:'background 0.15s' }}>
-                {day}
-                {hasTasks&&<div style={{ width:'4px', height:'4px', borderRadius:'50%', background:isSel?'rgba(255,255,255,0.7)':'var(--accent)', margin:'2px auto 0' }}/>}
-              </div>
-            );
-          })}
-        </div>
-        {selectedDate && (
-          <div style={{ marginTop:'20px' }}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px' }}>
-              <div style={{ fontSize:'10px', color:'var(--text3)', letterSpacing:'0.07em', fontWeight:'500' }}>{months[viewMonth].toUpperCase()} {selectedDate}</div>
-              <button onClick={() => { onAddWithDate(dateStr(selectedDate)); onClose(); }} style={{ fontSize:'11px', color:'var(--accent)', background:'none', border:'0.5px solid var(--accent)', borderRadius:'8px', padding:'4px 10px', cursor:'pointer', fontFamily:'var(--font)', display:'flex', alignItems:'center', gap:'4px' }}>
-                <i className="ti ti-plus" style={{ fontSize:'11px' }} /> Add task
-              </button>
-            </div>
-            {tasksForDay(selectedDate).length===0
-              ? <div style={{ fontSize:'13px', color:'var(--text3)', textAlign:'center', padding:'20px 0' }}>No tasks for this day</div>
-              : tasksForDay(selectedDate).map(t=>(
-                <div key={t.id} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'9px 12px', background:'var(--card)', borderRadius:'12px', marginBottom:'7px', border:'0.5px solid var(--border)' }}>
-                  <i className={`ti ${catIcon[t.category]||'ti-circle'}`} style={{ fontSize:'14px', color:'var(--accent)' }}/>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontSize:'13px', fontWeight:'500', color:'var(--text)', textDecoration:t.status==='done'?'line-through':'none' }}>{t.title}</div>
-                    <div style={{ fontSize:'11px', color:'var(--text3)', marginTop:'2px' }}>{t.status}</div>
-                  </div>
-                  <LoadPill load={t.mental_load||0}/>
-                </div>
-              ))
-            }
-          </div>
-        )}
+        {innerContent}
       </div>
     </div>
   );
 }
 
 // ── SETTINGS ──────────────────────────────────────────────
-function SettingsPanel({ open, onClose, token, syncCode }) {
+function SettingsPanel({ open, onClose, token, syncCode, inline }) {
   const [threshold, setThreshold] = useState(100);
   const [saved, setSaved] = useState(false);
   const [showCode, setShowCode] = useState(false);
@@ -662,26 +715,41 @@ function SettingsPanel({ open, onClose, token, syncCode }) {
     setSaved(true); setTimeout(()=>setSaved(false),2000);
   }
 
+  const innerContent = (
+    <>
+      <div className="form-group">
+        <label className="form-label">DAILY LOAD THRESHOLD</label>
+        <div className="slider-row" style={{ marginBottom:'6px' }}><span className="slider-label">Relaxed</span><span className="slider-val">{threshold}</span><span className="slider-label">Ambitious</span></div>
+        <input type="range" min="30" max="300" step="10" value={threshold} onChange={e=>setThreshold(Number(e.target.value))} />
+        <div style={{ fontSize:'11px', color:'var(--text3)', marginTop:'6px' }}>Controls how many tasks the algorithm includes in your daily card.</div>
+      </div>
+      <div className="form-group" style={{ marginTop:'20px' }}>
+        <label className="form-label">YOUR SYNC CODE</label>
+        <div style={{ display:'flex', alignItems:'center', gap:'10px', padding:'12px', background:'var(--s30)', borderRadius:'12px', marginTop:'5px' }}>
+          <span style={{ fontFamily:'var(--serif)', fontSize:'22px', color:'var(--text)', letterSpacing:'0.12em', flex:1 }}>{showCode ? syncCode : '••••••'}</span>
+          <button onClick={()=>setShowCode(s=>!s)} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text3)', fontSize:'18px' }}><i className={`ti ${showCode?'ti-eye-off':'ti-eye'}`}/></button>
+          <button onClick={()=>navigator.clipboard.writeText(syncCode)} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text3)', fontSize:'18px' }}><i className="ti ti-copy"/></button>
+        </div>
+        <div style={{ fontSize:'11px', color:'var(--text3)', marginTop:'6px' }}>Use this code to access your account from any device.</div>
+      </div>
+      <button className="submit-btn" onClick={save} style={{ marginTop:'24px' }}>{saved ? 'Saved!' : 'Save settings'}</button>
+    </>
+  );
+
+  if (inline) {
+    return (
+      <div>
+        <div className="panel-title" style={{ fontSize: '16px', marginBottom: '16px' }}>Settings</div>
+        {innerContent}
+      </div>
+    );
+  }
+
   return (
     <div className={`panel${open?' open':''}`}>
       <div className="panel-header"><button className="close-btn" onClick={onClose}><i className="ti ti-arrow-left" /></button><span className="panel-title">Settings</span></div>
       <div className="panel-body">
-        <div className="form-group">
-          <label className="form-label">DAILY LOAD THRESHOLD</label>
-          <div className="slider-row" style={{ marginBottom:'6px' }}><span className="slider-label">Relaxed</span><span className="slider-val">{threshold}</span><span className="slider-label">Ambitious</span></div>
-          <input type="range" min="30" max="300" step="10" value={threshold} onChange={e=>setThreshold(Number(e.target.value))} />
-          <div style={{ fontSize:'11px', color:'var(--text3)', marginTop:'6px' }}>Controls how many tasks the algorithm includes in your daily card.</div>
-        </div>
-        <div className="form-group" style={{ marginTop:'20px' }}>
-          <label className="form-label">YOUR SYNC CODE</label>
-          <div style={{ display:'flex', alignItems:'center', gap:'10px', padding:'12px', background:'var(--s30)', borderRadius:'12px', marginTop:'5px' }}>
-            <span style={{ fontFamily:'var(--serif)', fontSize:'22px', color:'var(--text)', letterSpacing:'0.12em', flex:1 }}>{showCode ? syncCode : '••••••'}</span>
-            <button onClick={()=>setShowCode(s=>!s)} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text3)', fontSize:'18px' }}><i className={`ti ${showCode?'ti-eye-off':'ti-eye'}`}/></button>
-            <button onClick={()=>navigator.clipboard.writeText(syncCode)} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text3)', fontSize:'18px' }}><i className="ti ti-copy"/></button>
-          </div>
-          <div style={{ fontSize:'11px', color:'var(--text3)', marginTop:'6px' }}>Use this code to access your account from any device.</div>
-        </div>
-        <button className="submit-btn" onClick={save} style={{ marginTop:'24px' }}>{saved ? 'Saved!' : 'Save settings'}</button>
+        {innerContent}
       </div>
     </div>
   );
@@ -691,6 +759,7 @@ function SettingsPanel({ open, onClose, token, syncCode }) {
 const DAYS = ['MON','TUE','WED','THU','FRI','SAT','SUN'];
 
 export default function App() {
+  const isDesktop = useIsDesktop();
   const [dark, setDark] = useState(false);
   const [onboarded, setOnboardedState] = useState(getOnboarded());
   const [tasks, setTasks] = useState([]);
@@ -880,6 +949,139 @@ export default function App() {
     );
   }
 
+  // Shared task list content (used by both mobile and desktop)
+  const taskListContent = (
+    <>
+      {events.map(ev=>(
+        <div className="event-block" key={ev.id}>
+          <i className="ti ti-calendar-event" style={{ fontSize:'18px', color:'var(--accent)', flexShrink:0 }}/>
+          <div style={{ flex:1 }}>
+            <div className="event-label">EVENT</div>
+            <div className="event-title">{ev.title}</div>
+            {ev.start_time&&ev.end_time&&<div className="event-time-display">{ev.start_time} – {ev.end_time}</div>}
+          </div>
+          <div style={{ display:'flex', gap:'4px' }}>
+            <button className="postpone-btn" onClick={()=>{setEditTask(ev);openPanel('add');}}><i className="ti ti-pencil"/></button>
+            <button className="postpone-btn" style={{ color:'var(--red)' }} onClick={()=>deleteTask(ev)}><i className="ti ti-trash"/></button>
+          </div>
+        </div>
+      ))}
+
+      {regularTasks.map((t,i,arr)=>renderTask(t,i,arr))}
+
+      {restorativeTasks.length>0&&(
+        <>
+          <div className="separator">
+            <div className="sep-line"/>
+            <div className="sep-tag"><i className="ti ti-heart" style={{ color:'var(--accent)' }}/> recharge</div>
+            <div className="sep-line"/>
+          </div>
+          {restorativeTasks.map((t,i,arr)=>renderTask(t,i,arr))}
+        </>
+      )}
+    </>
+  );
+
+  // ── DESKTOP LAYOUT ──
+  if (isDesktop) {
+    const sideItems = [
+      { key: 'pomo', icon: 'ti-clock-hour-4', label: 'Focus' },
+      { key: 'notes', icon: 'ti-notes', label: 'Notes' },
+      { key: 'cal', icon: 'ti-calendar-month', label: 'Calendar' },
+    ];
+    return (
+      <div className={`desktop-shell${dark?' dark':''}`}>
+        <div className="d-sidebar">
+          <div className="d-sidebar-logo">P</div>
+          <div className="d-sidebar-nav">
+            {sideItems.map(item => (
+              <button key={item.key} className={`d-side-btn${panel===item.key?' active':''}`}
+                onClick={() => panel===item.key ? closePanel() : openPanel(item.key)}
+                title={item.label}>
+                <i className={`ti ${item.icon}`} />
+              </button>
+            ))}
+          </div>
+          <div className="d-sidebar-bottom">
+            <button className="d-side-btn" onClick={()=>setDark(d=>!d)} title="Toggle dark mode"><i className={`ti ${dark?'ti-sun':'ti-moon'}`}/></button>
+            <button className={`d-side-btn${panel==='settings'?' active':''}`} onClick={()=> panel==='settings' ? closePanel() : openPanel('settings')} title="Settings"><i className="ti ti-settings"/></button>
+          </div>
+        </div>
+
+        <div className="d-main">
+          <div className="d-topbar">
+            <div>
+              <div className="date-main" style={{ fontSize: '20px' }}>{todayStr}</div>
+              <div className="date-sub">{loading?'Loading...':`${taskCount} task${taskCount!==1?'s':''} remaining${events.length?` · ${events.length} event${events.length!==1?'s':''}`:''}`}</div>
+            </div>
+            <div style={{ width: '220px' }}>
+              <LoadBar tasks={tasks}/>
+            </div>
+          </div>
+
+          {overloadCount>0&&(
+            <div className="d-overload-banner">
+              <i className="ti ti-info-circle" style={{ fontSize:'13px', verticalAlign:'-1px', marginRight:'6px' }}/>
+              {overloadCount} task{overloadCount!==1?'s':''} didn't fit today. Try spreading your study sessions across more days to avoid overload.
+            </div>
+          )}
+
+          <div className="d-body">
+            <div className="d-left-col">
+              <div className="week-strip-wrap" style={{ padding: 0, marginBottom: '16px', maxWidth: '480px' }}>
+                <div className="week-strip">
+                  {weekDays.map((d,i)=>(
+                    <div key={i} className={`day-cell${activeDay===i?' active':''}`} onClick={()=>setActiveDay(i)}>
+                      <span className="day-name">{d.name}</span>
+                      <span className="day-num">{d.num}</span>
+                      <div className={`day-dot${i===todayIdx?' has':''}`}/>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="section-header" style={{ padding: 0, marginBottom: '10px' }}>
+                <span className="section-title">{name?`${name}'s day`:'Today'}</span>
+              </div>
+
+              <div style={{ maxWidth: '480px' }}>
+                {loading&&<div style={{ textAlign:'center', padding:'40px 0', color:'var(--text3)', fontSize:'13px' }}>Loading your tasks...</div>}
+                {!loading&&tasks.length===0&&<div style={{ textAlign:'center', padding:'40px 0', color:'var(--text3)', fontSize:'13px', lineHeight:1.6 }}>No tasks yet.<br/>Click + to add your first task.</div>}
+                {taskListContent}
+              </div>
+            </div>
+
+            <div className="d-right-col">
+              {panel === 'pomo' && <PomodoroPanel open inline onClose={closePanel} />}
+              {panel === 'notes' && <NotesPanel open inline onClose={closePanel} token={token} />}
+              {panel === 'cal' && (
+                <>
+                  <div className="panel-title" style={{ fontSize: '16px', marginBottom: '16px' }}>Consistency</div>
+                  <HeatMap allTasks={allTasks}/>
+                  <div style={{ marginTop: '20px' }}>
+                    <CalendarPanel open inline onClose={closePanel} allTasks={allTasks} onAddWithDate={date=>{setPresetDeadline(date);setEditTask(null);openPanel('add');}}/>
+                  </div>
+                </>
+              )}
+              {panel === 'settings' && <SettingsPanel open inline onClose={closePanel} token={token} syncCode={syncCode} />}
+              {(!panel || panel === 'add') && (
+                <div className="d-empty-state">
+                  <i className="ti ti-sparkles" style={{ fontSize: '28px', color: 'var(--accent)', marginBottom: '12px' }} />
+                  <div style={{ fontFamily: 'var(--serif)', fontSize: '16px', color: 'var(--text)', marginBottom: '6px' }}>All clear here</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text3)', lineHeight: 1.6 }}>Pick Focus, Notes, or Calendar from the sidebar to see more.</div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <button className="d-fab" onClick={()=>{setEditTask(null);setPresetDeadline(null);openPanel('add');}}><i className="ti ti-plus"/></button>
+        <AddTaskPanel open={panel==='add'} onClose={closePanel} onAdd={addTask} editTask={editTask} onEdit={editTaskFn} presetDeadline={presetDeadline}/>
+      </div>
+    );
+  }
+
+  // ── MOBILE LAYOUT ──
   return (
     <div className={`phone${dark?' dark':''}`}>
       <div className="header">
@@ -910,11 +1112,7 @@ export default function App() {
             <div key={i} className={`day-cell${activeDay===i?' active':''}`} onClick={()=>setActiveDay(i)}>
               <span className="day-name">{d.name}</span>
               <span className="day-num">{d.num}</span>
-              <div className={`day-dot${(() => {
-              const d = new Date(today);
-              d.setDate(today.getDate() - todayIdx + i);
-              const ds = d.toISOString().split('T')[0];
-              return allTasks.some(t => t.deadline === ds) ? ' has' : '';})()} `}/>
+              <div className={`day-dot${i===todayIdx?' has':''}`}/>
             </div>
           ))}
         </div>
@@ -930,33 +1128,7 @@ export default function App() {
         {loading&&<div style={{ textAlign:'center', padding:'40px 0', color:'var(--text3)', fontSize:'13px' }}>Loading your tasks...</div>}
         {!loading&&tasks.length===0&&<div style={{ textAlign:'center', padding:'40px 0', color:'var(--text3)', fontSize:'13px', lineHeight:1.6 }}>No tasks yet.<br/>Tap + to add your first task.</div>}
 
-        {events.map(ev=>(
-          <div className="event-block" key={ev.id}>
-            <i className="ti ti-calendar-event" style={{ fontSize:'18px', color:'var(--accent)', flexShrink:0 }}/>
-            <div style={{ flex:1 }}>
-              <div className="event-label">EVENT</div>
-              <div className="event-title">{ev.title}</div>
-              {ev.start_time&&ev.end_time&&<div className="event-time-display">{ev.start_time} – {ev.end_time}</div>}
-            </div>
-            <div style={{ display:'flex', gap:'4px' }}>
-              <button className="postpone-btn" onClick={()=>{setEditTask(ev);openPanel('add');}}><i className="ti ti-pencil"/></button>
-              <button className="postpone-btn" style={{ color:'var(--red)' }} onClick={()=>deleteTask(ev)}><i className="ti ti-trash"/></button>
-            </div>
-          </div>
-        ))}
-
-        {regularTasks.map((t,i,arr)=>renderTask(t,i,arr))}
-
-        {restorativeTasks.length>0&&(
-          <>
-            <div className="separator">
-              <div className="sep-line"/>
-              <div className="sep-tag"><i className="ti ti-heart" style={{ color:'var(--accent)' }}/> recharge</div>
-              <div className="sep-line"/>
-            </div>
-            {restorativeTasks.map((t,i,arr)=>renderTask(t,i,arr))}
-          </>
-        )}
+        {taskListContent}
       </div>
 
       <div className="bottom-nav">
