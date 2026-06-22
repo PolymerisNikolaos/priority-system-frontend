@@ -33,16 +33,15 @@
 
 body {
   font-family: var(--font);
-  background: #e8e4dc;
+  background: var(--bg);
   min-height: 100vh;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  padding: 20px;
+  margin: 0;
+  padding: 0;
 }
 
 .phone {
   width: 375px;
+  margin: 20px auto;
   min-height: 780px;
   background: var(--p60);
   border-radius: 40px;
@@ -629,6 +628,7 @@ input[type=range] {
 /* ── DESKTOP SHELL ── */
 .desktop-shell {
   display: flex;
+  width: 100vw;
   min-height: 100vh;
   background: var(--bg);
   font-family: var(--font);
